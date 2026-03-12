@@ -1,0 +1,28 @@
+[Unit]
+Description=NEXUS Command Center Frontend (Next.js)
+After=network-online.target nexus-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__NEXUS_USER__
+Group=__NEXUS_USER__
+WorkingDirectory=__PROJECT_DIR__/nexus-agi/command-center/frontend
+ExecStart=__PNPM_BIN__ start --port 3000
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+EnvironmentFile=__ENV_FILE__
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexus-frontend
+
+# Security hardening
+NoNewPrivileges=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=__PROJECT_DIR__
+
+[Install]
+WantedBy=multi-user.target

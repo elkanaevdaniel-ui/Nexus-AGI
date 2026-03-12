@@ -1,0 +1,29 @@
+[Unit]
+Description=NEXUS Lead Gen Frontend (Next.js)
+After=network-online.target nexus-leadgen-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__NEXUS_USER__
+Group=__NEXUS_USER__
+WorkingDirectory=__PROJECT_DIR__/lead-gen/frontend
+ExecStart=__PNPM_BIN__ start --port 3001
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=NEXT_PUBLIC_BASE_PATH=/leadgen
+EnvironmentFile=__ENV_FILE__
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexus-leadgen-frontend
+
+# Security hardening
+NoNewPrivileges=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=__PROJECT_DIR__
+
+[Install]
+WantedBy=multi-user.target

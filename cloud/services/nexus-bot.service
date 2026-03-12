@@ -1,0 +1,28 @@
+[Unit]
+Description=NEXUS Telegram Bot (Herald Division)
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__NEXUS_USER__
+Group=__NEXUS_USER__
+WorkingDirectory=__PROJECT_DIR__/linkedin-bot
+ExecStart=__VENV_DIR__/bin/python3 bot.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=__ENV_FILE__
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexus-bot
+
+# Security hardening
+NoNewPrivileges=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=__PROJECT_DIR__
+
+[Install]
+WantedBy=multi-user.target

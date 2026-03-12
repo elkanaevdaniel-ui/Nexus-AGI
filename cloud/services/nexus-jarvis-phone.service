@@ -1,0 +1,24 @@
+[Unit]
+Description=NEXUS JARVIS Phone (Twilio Voice Interface)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__NEXUS_USER__
+Group=__NEXUS_USER__
+WorkingDirectory=__PROJECT_DIR__/nexus-agi/interfaces/jarvis-phone
+ExecStart=__VENV_DIR__/bin/python3 -m uvicorn jarvis_phone_server:app --host 0.0.0.0 --port 7863 --log-level warning
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=__PROJECT_DIR__/linkedin-bot/.env
+
+StandardOutput=append:__PROJECT_DIR__/linkedin-bot/logs/jarvis_phone.log
+StandardError=append:__PROJECT_DIR__/linkedin-bot/logs/jarvis_phone.log
+
+NoNewPrivileges=true
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

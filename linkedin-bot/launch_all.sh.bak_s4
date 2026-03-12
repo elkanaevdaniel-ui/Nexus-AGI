@@ -1,0 +1,138 @@
+#!/bin/bash
+cd /a0/usr/workdir/linkedin-bot
+echo "================================================"
+echo "  NEXUS AGI System — Starting Up"
+echo "================================================"
+
+# Kill existing processes
+echo "[1/5] Stopping old processes..."
+pkill -f 'python3 run.py' 2>/dev/null
+pkill -f 'dashboard/app.py' 2>/dev/null
+pkill -f 'watchdog.py' 2>/dev/null
+pkill -f 'jarvis_pwa_server.py' 2>/dev/null
+pkill -f 'nokey@localhost.run' 2>/dev/null
+pkill -f 'localhost.run' 2>/dev/null
+sleep 2
+
+# Clear logs
+> logs/bot.log
+> logs/dashboard.log
+> logs/watchdog.log
+> logs/tunnel.log
+> logs/tunnel_url.txt
+
+# Start Bot
+echo "[2/5] Starting HERALD bot..."
+nohup python3 run.py > logs/bot.log 2>&1 &
+echo $! > /tmp/linkedin_bot.pid
+echo "  Bot PID: $!"
+
+# Start Watchdog
+nohup python3 watchdog.py > logs/watchdog.log 2>&1 &
+echo $! > /tmp/linkedin_watchdog.pid
+echo "  Watchdog PID: $!"
+
+# Start Dashboard (port 7860)
+echo "[3/5] Starting NEXUS Dashboard (port 7860)..."
+nohup python3 dashboard/app.py > logs/dashboard.log 2>&1 &
+echo $! > /tmp/linkedin_dashboard.pid
+echo "  Dashboard PID: $!"
+sleep 3
+
+# Start JARVIS PWA (port 7861)
+echo "[4/5] Starting JARVIS v0.2 PWA (port 7861)..."
+mkdir -p logs
+nohup python3 /a0/usr/workdir/nexus-agi/interfaces/jarvis-pwa/jarvis_pwa_server.py \
+    > logs/jarvis_pwa.log 2>&1 &
+echo $! > /tmp/jarvis_pwa.pid
+echo "  JARVIS PWA PID: $!"
+sleep 2
+
+# Start Tunnel and capture URL
+echo "[5/5] Starting tunnels (Dashboard:7860 + JARVIS PWA:7861)..."
+# Dashboard tunnel (port 7860)
+nohup ssh -o StrictHostKeyChecking=no \
+         -o ServerAliveInterval=30 \
+         -o ServerAliveCountMax=3 \
+         -i /a0/usr/workdir/nexus-agi/infrastructure/nexus_tunnel_key \
+         -R 80:localhost:7860 \
+         nokey@localhost.run > logs/tunnel.log 2>&1 &
+echo $! > /tmp/linkedin_tunnel.pid
+echo "  Dashboard Tunnel PID: $!"
+
+# JARVIS PWA tunnel (port 7861)
+nohup ssh -o StrictHostKeyChecking=no \
+         -o ServerAliveInterval=30 \
+         -o ServerAliveCountMax=3 \
+         -i /a0/usr/workdir/nexus-agi/infrastructure/nexus_tunnel_key \
+         -R 80:localhost:7861 \
+         nokey@localhost.run > logs/tunnel_jarvis.log 2>&1 &
+echo $! > /tmp/jarvis_tunnel.pid
+echo "  JARVIS Tunnel PID: $!"
+
+# Wait for tunnel URL to appear
+echo "  Waiting for tunnel URL..."
+for i in $(seq 1 15); do
+    URL=$(grep -o 'https://[a-zA-Z0-9]*.lhr.life' logs/tunnel.log 2>/dev/null | tail -1)
+    if [ -n "$URL" ]; then
+        break
+    fi
+    sleep 1
+done
+
+# Save URL to file
+if [ -n "$URL" ]; then
+    echo "$URL" > logs/tunnel_url.txt
+    echo ""
+    echo "================================================"
+    echo "  ✅ NEXUS AGI System is running!"
+    echo "================================================"
+    echo ""
+    echo "  🌐 Dashboard (HERALD) : $URL"
+    # Get JARVIS PWA tunnel URL
+    JARVIS_URL=$(grep -o 'https://[a-zA-Z0-9]*.lhr.life' logs/tunnel_jarvis.log 2>/dev/null | tail -1)
+    if [ -n "$JARVIS_URL" ]; then
+        echo "  🤖 JARVIS PWA         : $JARVIS_URL"
+        echo "$JARVIS_URL" > logs/tunnel_jarvis_url.txt
+
+# ─── NEXUS Master Dashboard (port 7862) ───────────────────────────────────
+echo "[5/7] Starting NEXUS Master Dashboard (port 7862)..."
+pkill -f nexus_dashboard_server 2>/dev/null; sleep 1
+nohup python3 /a0/usr/workdir/nexus-agi/interfaces/dashboard/nexus_dashboard_server.py \
+    > /a0/usr/workdir/linkedin-bot/logs/nexus_dashboard.log 2>&1 &
+echo $! > /tmp/nexus_dashboard.pid
+
+# ─── Tunnel 3: NEXUS Dashboard → localhost.run ────────────────────────────
+echo "[6/7] Opening tunnel for NEXUS Dashboard..."
+ssh -i /a0/usr/workdir/nexus-agi/infrastructure/nexus_tunnel_key \
+    -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ExitOnForwardFailure=no \
+    -R 80:localhost:7862 nokey@localhost.run \
+    > /a0/usr/workdir/linkedin-bot/logs/tunnel_nexus_dashboard.log 2>&1 &
+sleep 6
+grep -o 'https://[a-z0-9]*.lhr.life' \
+    /a0/usr/workdir/linkedin-bot/logs/tunnel_nexus_dashboard.log 2>/dev/null | head -1 \
+    > /a0/usr/workdir/linkedin-bot/logs/tunnel_nexus_url.txt
+NEXUS_URL=$(cat /a0/usr/workdir/linkedin-bot/logs/tunnel_nexus_url.txt 2>/dev/null)
+echo "[6/7] NEXUS Dashboard URL: $NEXUS_URL"
+
+    else
+        echo "  🤖 JARVIS PWA (local) : http://localhost:7861"
+    fi
+    echo "  🔑 JARVIS PIN         : 2026NEXUS"
+    echo ""
+    echo "  📋 Logs:"
+    echo "    HERALD bot : tail -f logs/bot.log"
+    echo "    Dashboard  : tail -f logs/dashboard.log"
+    echo "    JARVIS PWA : tail -f logs/jarvis_pwa.log"
+    echo ""
+    echo "  📋 Other commands:"
+    echo "    Get URL    : bash get_url.sh"
+    echo "    Stop all   : bash stop_all.sh"
+    echo "================================================"
+else
+    echo ""
+    echo "  ⚠️  System started but tunnel URL not yet ready."
+    echo "  JARVIS PWA running at: http://localhost:7861"
+    echo "  JARVIS PIN: 2026NEXUS"
+    echo "  Wait 10 seconds then run: bash get_url.sh"
+fi

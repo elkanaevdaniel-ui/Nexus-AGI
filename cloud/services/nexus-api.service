@@ -1,0 +1,29 @@
+[Unit]
+Description=NEXUS Command Center API (FastAPI)
+After=network-online.target redis-server.service
+Wants=network-online.target
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=__NEXUS_USER__
+Group=__NEXUS_USER__
+WorkingDirectory=__PROJECT_DIR__/nexus-agi/command-center/backend
+ExecStart=__VENV_DIR__/bin/uvicorn main:app --host 127.0.0.1 --port 8080 --log-level warning
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=__ENV_FILE__
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexus-api
+
+# Security hardening
+NoNewPrivileges=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=__PROJECT_DIR__
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,27 @@
+[Unit]
+Description=NEXUS SIGMA Trading Terminal (Streamlit)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__NEXUS_USER__
+Group=__NEXUS_USER__
+WorkingDirectory=__PROJECT_DIR__/nexus-agi/divisions/tier3-intelligence/sigma
+ExecStart=__VENV_DIR__/bin/streamlit run ui/app.py --server.port 8501 --server.headless true --server.address 127.0.0.1
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=__ENV_FILE__
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexus-sigma
+
+NoNewPrivileges=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=__PROJECT_DIR__
+
+[Install]
+WantedBy=multi-user.target

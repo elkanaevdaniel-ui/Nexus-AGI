@@ -1,0 +1,172 @@
+import asyncio
+import json
+import os
+import signal
+import sqlite3
+import subprocess
+import sys
+import re
+from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, "/a0/usr/workdir/linkedin-bot")
+
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+import uvicorn
+
+from config import DB_PATH, LOG_FILE, OUTPUT_DIR, SCHEDULE_HOUR, SCHEDULE_MINUTE, NEWS_FEEDS, LLM_MODEL
+from database import get_post, update_post, init_db
+
+app = FastAPI(title="LinkedIn Bot Dashboard")
+templates = Jinja2Templates(directory="/a0/usr/workdir/linkedin-bot/dashboard/templates")
+app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
+
+BOT_PID_FILE = "/tmp/linkedin_bot.pid"
+LOG_PATH = LOG_FILE
+
+def get_bot_status():
+    try:
+        pid = int(open(BOT_PID_FILE).read().strip())
+        os.kill(pid, 0)
+        return {"running": True, "pid": pid}
+    except:
+        return {"running": False, "pid": None}
+
+def get_all_posts(limit=50):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM posts ORDER BY created_at DESC LIMIT ?", (limit,))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+def get_stats():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM posts"); total = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM posts WHERE status='approved'"); approved = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM posts WHERE DATE(created_at)=DATE('now')"); today = c.fetchone()[0]
+    conn.close()
+    return {"total": total, "approved": approved, "today": today}
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    status = get_bot_status()
+    posts = get_all_posts(20)
+    stats = get_stats()
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "status": status,
+        "posts": posts,
+        "stats": stats,
+        "schedule": f"{SCHEDULE_HOUR:02d}:{SCHEDULE_MINUTE:02d}",
+        "model": LLM_MODEL,
+        "feeds": NEWS_FEEDS
+    })
+
+@app.get("/api/status")
+async def api_status():
+    return get_bot_status()
+
+@app.get("/api/posts")
+async def api_posts():
+    return get_all_posts()
+
+@app.get("/api/stats")
+async def api_stats():
+    return get_stats()
+
+@app.post("/api/bot/start")
+async def start_bot():
+    status = get_bot_status()
+    if status["running"]:
+        return {"ok": False, "msg": "Bot already running"}
+    log_f = open(LOG_FILE, "a")
+    proc = subprocess.Popen(["python3", "run.py"], cwd="/a0/usr/workdir/linkedin-bot", stdout=log_f, stderr=subprocess.STDOUT)
+    open(BOT_PID_FILE, "w").write(str(proc.pid))
+    return {"ok": True, "pid": proc.pid, "msg": "Bot started"}
+
+@app.post("/api/bot/stop")
+async def stop_bot():
+    status = get_bot_status()
+    if not status["running"]:
+        return {"ok": False, "msg": "Bot not running"}
+    os.kill(status["pid"], signal.SIGTERM)
+    return {"ok": True, "msg": "Bot stopped"}
+
+@app.post("/api/bot/generate")
+async def generate_post():
+    script = """
+import sys; sys.path.insert(0, '/a0/usr/workdir/linkedin-bot')
+from scraper import fetch_news, pick_best_article
+from ai_writer import write_linkedin_post, generate_image_prompt
+from image_gen import generate_image
+from database import save_post, get_recent_topics, update_post, init_db
+init_db()
+articles = fetch_news()
+used = get_recent_topics(5)
+article = pick_best_article(articles, used)
+if article:
+    post_text = write_linkedin_post(article)
+    img_prompt, hook_text = generate_image_prompt(article, post_text)
+    post_id = save_post(article['title'][:100], article['title'], article['url'], post_text, '', '')
+    img_path, img_url = generate_image(img_prompt, post_id, title=article['title'], source=article.get('source',''), hook=hook_text)
+    if img_path:
+        update_post(post_id, image_path=img_path, image_url=img_url)
+    print('Post', post_id, 'generated')
+"""
+    subprocess.Popen(["python3", "-c", script], cwd="/a0/usr/workdir/linkedin-bot")
+    return {"ok": True, "msg": "Post generation started! Refresh posts in ~60 seconds."}
+
+@app.post("/api/post/{post_id}/approve")
+async def approve_post(post_id: int):
+    update_post(post_id, status="approved", approved_at=datetime.now().isoformat())
+    return {"ok": True}
+
+@app.post("/api/post/{post_id}/edit")
+async def edit_post(post_id: int, request: Request):
+    data = await request.json()
+    new_text = data.get("text", "")
+    if new_text:
+        update_post(post_id, post_text=new_text)
+    return {"ok": True}
+
+@app.get("/api/post/{post_id}/image")
+async def get_image(post_id: int):
+    post = get_post(post_id)
+    if post and post.get("image_path") and os.path.exists(post["image_path"]):
+        return FileResponse(post["image_path"], media_type="image/png")
+    raise HTTPException(404, "Image not found")
+
+@app.get("/api/logs/stream")
+async def stream_logs():
+    async def generate():
+        try:
+            with open(LOG_PATH, "r") as f:
+                f.seek(0, 2)
+                while True:
+                    line = f.readline()
+                    if line:
+                        yield f"data: {json.dumps(line.rstrip())}\n\n"
+                    else:
+                        await asyncio.sleep(0.5)
+        except Exception as e:
+            yield f"data: {json.dumps(str(e))}\n\n"
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+@app.get("/api/logs/history")
+async def log_history(lines: int = 100):
+    try:
+        result = subprocess.run(["tail", f"-{lines}", LOG_PATH], capture_output=True, text=True)
+        return {"lines": result.stdout.splitlines()}
+    except:
+        return {"lines": []}
+
+if __name__ == "__main__":
+    init_db()
+    print("LinkedIn Bot Dashboard running at http://localhost:7860")
+    uvicorn.run(app, host="0.0.0.0", port=7860, log_level="warning")

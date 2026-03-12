@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+venv/
+.venv/
+
+# Environment
+.env
+*.env.local
+
+# Databases
+*.db
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+.next/
+npm-debug.log
+
+# Logs
+logs/
+*.log
+
+# Agent Zero
+agent-zero/tmp/
+agent-zero/logs/
+agent-zero/knowledge/custom/
+
+# Trading
+trading/*.db
+
+# Compiled
+*.so
+*.dylib
+
+# Secrets backup (keep encoded version only)
+# .claude/hooks/env-restore.b64 is committed intentionally

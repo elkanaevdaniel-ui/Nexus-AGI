@@ -1,0 +1,251 @@
+<html>
+<head>
+  <script type="module">
+    import { store as nexusDashboardStore } from "/components/sidebar/nexus-dashboard/nexus-dashboard-store.js";
+  </script>
+</head>
+<body>
+  <div x-data>
+    <template x-if="$store.nexusDashboard">
+      <div class="nexus-dashboard">
+        <div class="nexus-dashboard-header" @click="$store.nexusDashboard.toggle()">
+          <span class="material-symbols-outlined nexus-icon">hub</span>
+          <span class="nexus-title">Nexus Services</span>
+          <span class="material-symbols-outlined expand-icon"
+            x-text="$store.nexusDashboard.isExpanded ? 'expand_less' : 'expand_more'"></span>
+        </div>
+
+        <div x-show="$store.nexusDashboard.isExpanded" x-transition class="nexus-services-list">
+          <template x-for="service in $store.nexusDashboard.services" :key="service.id">
+            <div class="nexus-service-item" :class="{'service-online': service.status === 'online', 'service-offline': service.status === 'offline', 'service-loading': service.status === 'checking'}">
+              <div class="service-status-dot" :class="service.status"></div>
+              <div class="service-info">
+                <span class="service-name" x-text="service.name"></span>
+                <span class="service-detail" x-text="service.detail"></span>
+              </div>
+              <div class="service-actions">
+                <button class="service-btn" @click="$store.nexusDashboard.openService(service.id)"
+                  title="Open">
+                  <span class="material-symbols-outlined">open_in_new</span>
+                </button>
+                <button class="service-btn" @click="$store.nexusDashboard.restartService(service.id)"
+                  title="Restart" x-show="service.status === 'online'">
+                  <span class="material-symbols-outlined">restart_alt</span>
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <div class="nexus-refresh-row">
+            <button class="nexus-refresh-btn" @click="$store.nexusDashboard.refreshAll()"
+              :disabled="$store.nexusDashboard.isRefreshing">
+              <span class="material-symbols-outlined"
+                :class="{'spinning': $store.nexusDashboard.isRefreshing}">refresh</span>
+              <span x-text="$store.nexusDashboard.isRefreshing ? 'Checking...' : 'Refresh All'"></span>
+            </button>
+            <span class="nexus-last-check" x-text="$store.nexusDashboard.lastCheckText"></span>
+          </div>
+
+          <div class="nexus-quick-actions">
+            <button class="nexus-action-btn" @click="$store.nexusDashboard.sendCommand('status')"
+              title="Ask A0 for full status report">
+              <span class="material-symbols-outlined">monitoring</span>
+              Full Report
+            </button>
+            <button class="nexus-action-btn" @click="$store.nexusDashboard.sendCommand('budget')"
+              title="Check budget usage">
+              <span class="material-symbols-outlined">payments</span>
+              Budget
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <style>
+    .nexus-dashboard {
+      margin: 8px 12px;
+      border-radius: 8px;
+      background: var(--color-panel-alt, rgba(255,255,255,0.03));
+      border: 1px solid var(--color-border);
+      overflow: hidden;
+    }
+
+    .nexus-dashboard-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .nexus-dashboard-header:hover {
+      background: rgba(255,255,255,0.05);
+    }
+
+    .nexus-icon {
+      font-size: 18px;
+      color: var(--color-primary, #6366f1);
+    }
+
+    .nexus-title {
+      font-size: 13px;
+      font-weight: 600;
+      flex: 1;
+      color: var(--color-text);
+    }
+
+    .expand-icon {
+      font-size: 18px;
+      color: var(--color-text-muted);
+    }
+
+    .nexus-services-list {
+      padding: 4px 8px 8px;
+    }
+
+    .nexus-service-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      margin-bottom: 2px;
+      transition: background 0.15s;
+    }
+
+    .nexus-service-item:hover {
+      background: rgba(255,255,255,0.04);
+    }
+
+    .service-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .service-status-dot.online { background: #10b981; box-shadow: 0 0 6px #10b98155; }
+    .service-status-dot.offline { background: #ef4444; }
+    .service-status-dot.checking { background: #f59e0b; animation: pulse 1s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .spinning { animation: spin 1s linear infinite; }
+
+    .service-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .service-name {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--color-text);
+    }
+
+    .service-detail {
+      font-size: 10px;
+      color: var(--color-text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .service-actions {
+      display: flex;
+      gap: 2px;
+    }
+
+    .service-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px;
+      border-radius: 4px;
+      color: var(--color-text-muted);
+      transition: all 0.15s;
+    }
+
+    .service-btn:hover {
+      background: rgba(255,255,255,0.1);
+      color: var(--color-primary, #6366f1);
+    }
+
+    .service-btn .material-symbols-outlined { font-size: 16px; }
+
+    .nexus-refresh-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 4px;
+      margin-top: 4px;
+      border-top: 1px solid var(--color-border);
+    }
+
+    .nexus-refresh-btn {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--color-primary, #6366f1);
+      font-size: 11px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      transition: background 0.15s;
+    }
+
+    .nexus-refresh-btn:hover { background: rgba(99, 102, 241, 0.1); }
+    .nexus-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .nexus-refresh-btn .material-symbols-outlined { font-size: 16px; }
+
+    .nexus-last-check {
+      font-size: 10px;
+      color: var(--color-text-muted);
+    }
+
+    .nexus-quick-actions {
+      display: flex;
+      gap: 6px;
+      padding: 6px 4px 2px;
+    }
+
+    .nexus-action-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      background: rgba(99, 102, 241, 0.08);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      color: var(--color-primary, #6366f1);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      transition: all 0.15s;
+    }
+
+    .nexus-action-btn:hover {
+      background: rgba(99, 102, 241, 0.15);
+      border-color: rgba(99, 102, 241, 0.4);
+    }
+
+    .nexus-action-btn .material-symbols-outlined { font-size: 14px; }
+  </style>
+</body>
+</html>

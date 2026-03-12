@@ -1,0 +1,12 @@
+[Unit]
+Description=NEXUS Daily GitHub Backup
+
+[Service]
+Type=oneshot
+User=__NEXUS_USER__
+Group=__NEXUS_USER__
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/cloud/backup.sh
+
+StandardOutput=append:__PROJECT_DIR__/linkedin-bot/logs/backup.log
+StandardError=append:__PROJECT_DIR__/linkedin-bot/logs/backup.log

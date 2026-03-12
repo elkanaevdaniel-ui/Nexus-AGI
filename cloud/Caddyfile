@@ -1,0 +1,68 @@
+# NEXUS AGI — Caddy Reverse Proxy Configuration
+# Replace __DOMAIN__ with your DuckDNS domain (e.g., nexus-elkana.duckdns.org)
+
+__DOMAIN__ {
+    # ── Main Dashboard (Next.js on :3000) ────────────────────────────────
+    handle / {
+        reverse_proxy localhost:3000
+    }
+    handle /dashboard/* {
+        reverse_proxy localhost:3000
+    }
+    handle /_next/* {
+        reverse_proxy localhost:3000
+    }
+
+    # ── Command Center API (FastAPI on :8080) ────────────────────────────
+    handle /api/* {
+        reverse_proxy localhost:8080
+    }
+
+    # ── WebSocket (real-time streaming) ──────────────────────────────────
+    handle /ws {
+        reverse_proxy localhost:8080
+    }
+
+    # ── SIGMA Trading Terminal (Streamlit on :8501) ──────────────────────
+    handle /trading/* {
+        uri strip_prefix /trading
+        reverse_proxy localhost:8501
+    }
+
+    # ── LinkedIn Bot Dashboard (on :7860) ────────────────────────────────
+    handle /bot-dashboard/* {
+        uri strip_prefix /bot-dashboard
+        reverse_proxy localhost:7860
+    }
+
+    # ── Lead Gen App (Next.js on :3001 + API on :8082) ─────────────────
+    handle /leadgen/api/* {
+        uri strip_prefix /leadgen
+        reverse_proxy localhost:8082
+    }
+    handle /leadgen* {
+        reverse_proxy localhost:3001
+    }
+
+    # ── Security Headers ─────────────────────────────────────────────────
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # ── Logging ──────────────────────────────────────────────────────────
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 10mb
+            roll_keep 5
+        }
+    }
+
+    # ── Default: proxy to Next.js for all other routes ───────────────────
+    handle {
+        reverse_proxy localhost:3000
+    }
+}

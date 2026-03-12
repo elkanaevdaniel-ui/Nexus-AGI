@@ -1,0 +1,23 @@
+[Unit]
+Description=NEXUS Command Center Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__NEXUS_USER__
+Group=__NEXUS_USER__
+WorkingDirectory=__PROJECT_DIR__/nexus-agi/interfaces/dashboard
+ExecStart=__VENV_DIR__/bin/python3 nexus_dashboard_server.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=append:__PROJECT_DIR__/linkedin-bot/logs/nexus_dashboard.log
+StandardError=append:__PROJECT_DIR__/linkedin-bot/logs/nexus_dashboard.log
+
+NoNewPrivileges=true
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
