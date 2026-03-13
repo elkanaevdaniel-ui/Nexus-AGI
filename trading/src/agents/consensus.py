@@ -1,76 +1,203 @@
 """Multi-LLM consensus graph using LangGraph.
 
-Fan-out: 3 LLMs run in parallel.
+Fan-out: 3 LLMs run in parallel via the unified router.
 Fan-in: results feed into bull/bear debate, then synthesizer.
+
+All LLM calls go through the unified LLM router service (services/llm-router)
+to ensure consistent cost tracking, circuit breaking, and fallback chains.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import re
 from typing import Any
 
+import httpx
 from loguru import logger
 
 from src.agents.state import ConsensusState
 
+# Configuration
+LLM_ROUTER_URL = os.getenv("LLM_ROUTER_URL", "http://localhost:5100")
+LLM_TIMEOUT = int(os.getenv("LLM_CONSENSUS_TIMEOUT", "45"))
+
+
+def _build_probability_prompt(state: ConsensusState) -> str:
+    """Build the probability estimation prompt from market state."""
+    market = state.get("market", {})
+    question = market.get("question", "Unknown market question")
+    description = market.get("description", "")
+    current_price = market.get("price", "N/A")
+    volume = market.get("volume", "N/A")
+    end_date = market.get("end_date", "N/A")
+
+    return (
+        f"You are a prediction market analyst. Estimate the probability that the following "
+        f"event resolves YES.\n\n"
+        f"Question: {question}\n"
+        f"Description: {description[:500]}\n"
+        f"Current market price: {current_price}\n"
+        f"24h volume: {volume}\n"
+        f"End date: {end_date}\n\n"
+        f"Respond ONLY with valid JSON:\n"
+        f'{{"probability": <float 0.01-0.99>, "confidence": "<high|medium|low>", '
+        f'"reasoning": "<2-3 sentence explanation>"}}'
+    )
+
+
+def _parse_llm_response(raw_text: str, provider_name: str) -> dict:
+    """Parse LLM JSON response into estimate dict. Handles markdown fences."""
+    try:
+        cleaned = re.sub(r"\`\`\`(?:json)?\s*", "", raw_text).strip().rstrip("\`")
+        data = json.loads(cleaned)
+        prob = float(data.get("probability", 0.5))
+        prob = max(0.01, min(0.99, prob))
+        confidence = data.get("confidence", "medium")
+        if confidence not in ("high", "medium", "low"):
+            confidence = "medium"
+        reasoning = data.get("reasoning", f"{provider_name} analysis")
+        return {
+            "probability": prob,
+            "confidence": confidence,
+            "reasoning": reasoning,
+        }
+    except (json.JSONDecodeError, ValueError, TypeError) as e:
+        logger.warning("Failed to parse %s response: %s — raw: %s", provider_name, e, raw_text[:200])
+        return {
+            "probability": 0.5,
+            "confidence": "low",
+            "reasoning": f"{provider_name} response could not be parsed",
+        }
+
+
+async def _call_router(prompt: str, tier: str = "deep", preferred_provider: str | None = None) -> str:
+    """Call the unified LLM router and return the response text."""
+    payload: dict[str, Any] = {
+        "messages": [{"role": "user", "content": prompt}],
+        "tier": tier,
+        "temperature": 0.2,
+        "max_tokens": 300,
+    }
+    if preferred_provider:
+        payload["preferred_provider"] = preferred_provider
+
+    async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
+        resp = await client.post(f"{LLM_ROUTER_URL}/v1/chat/completions", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
+
 
 async def call_claude_node(state: ConsensusState) -> dict:
-    """Claude analyst node — returns estimate dict."""
-    # In production, this calls the actual LLM via langchain
-    # For build/test, returns a placeholder structure
+    """Claude analyst node — calls Claude via the unified router."""
+    prompt = _build_probability_prompt(state)
+    try:
+        raw = await _call_router(prompt, tier="deep", preferred_provider="anthropic")
+        estimate = _parse_llm_response(raw, "Claude")
+    except Exception as e:
+        logger.error("Claude node failed: %s", e)
+        estimate = {"probability": 0.5, "confidence": "low", "reasoning": f"Claude call failed: {e}"}
+
     return {
-        "claude_estimate": {
-            "probability": 0.5,
-            "confidence": "medium",
-            "reasoning": "Claude analysis placeholder",
-        },
-        "messages": [{"role": "claude", "content": "Analysis complete"}],
+        "claude_estimate": estimate,
+        "messages": [{"role": "claude", "content": f"Analysis: p={estimate['probability']:.3f}"}],
     }
 
 
 async def call_gemini_node(state: ConsensusState) -> dict:
-    """Gemini analyst node."""
+    """Gemini analyst node — calls Gemini via the unified router."""
+    prompt = _build_probability_prompt(state)
+    try:
+        raw = await _call_router(prompt, tier="deep", preferred_provider="google")
+        estimate = _parse_llm_response(raw, "Gemini")
+    except Exception as e:
+        logger.error("Gemini node failed: %s", e)
+        estimate = {"probability": 0.5, "confidence": "low", "reasoning": f"Gemini call failed: {e}"}
+
     return {
-        "gemini_estimate": {
-            "probability": 0.5,
-            "confidence": "medium",
-            "reasoning": "Gemini analysis placeholder",
-        },
-        "messages": [{"role": "gemini", "content": "Analysis complete"}],
+        "gemini_estimate": estimate,
+        "messages": [{"role": "gemini", "content": f"Analysis: p={estimate['probability']:.3f}"}],
     }
 
 
 async def call_gpt_node(state: ConsensusState) -> dict:
-    """GPT analyst node."""
+    """GPT analyst node — calls GPT via the unified router."""
+    prompt = _build_probability_prompt(state)
+    try:
+        raw = await _call_router(prompt, tier="balanced", preferred_provider="openrouter")
+        estimate = _parse_llm_response(raw, "GPT")
+    except Exception as e:
+        logger.error("GPT node failed: %s", e)
+        estimate = {"probability": 0.5, "confidence": "low", "reasoning": f"GPT call failed: {e}"}
+
     return {
-        "gpt_estimate": {
-            "probability": 0.5,
-            "confidence": "medium",
-            "reasoning": "GPT analysis placeholder",
-        },
-        "messages": [{"role": "gpt", "content": "Analysis complete"}],
+        "gpt_estimate": estimate,
+        "messages": [{"role": "gpt", "content": f"Analysis: p={estimate['probability']:.3f}"}],
     }
 
 
 async def argue_bull_case(state: ConsensusState) -> dict:
-    """Bull researcher — argues for higher probability."""
+    """Bull researcher — argues for higher probability using LLM analysis."""
     estimates = []
+    reasonings = []
     for key in ["claude_estimate", "gemini_estimate", "gpt_estimate"]:
         est = state.get(key)
         if est and isinstance(est, dict):
             estimates.append(est.get("probability", 0.5))
+            reasonings.append(est.get("reasoning", ""))
 
     avg = sum(estimates) / len(estimates) if estimates else 0.5
+    context = "; ".join(r for r in reasonings if r)
+
+    try:
+        prompt = (
+            f"You are a bull-case analyst. Given these analyst estimates (avg: {avg:.3f}) "
+            f"and their reasoning: {context[:500]}\n\n"
+            f"Make the strongest case for why the probability should be HIGHER than {avg:.3f}. "
+            f"Be specific and cite data. Keep it to 2-3 sentences."
+        )
+        raw = await _call_router(prompt, tier="fast")
+        bull_case = raw[:500]
+    except Exception as e:
+        logger.warning("Bull case LLM failed: %s", e)
+        bull_case = f"Bull case: factors supporting higher probability (avg estimate: {avg:.3f})"
 
     return {
-        "bull_case": f"Bull case: factors supporting higher probability (avg estimate: {avg:.3f})",
+        "bull_case": bull_case,
         "messages": [{"role": "bull", "content": "Bull case argued"}],
     }
 
 
 async def argue_bear_case(state: ConsensusState) -> dict:
-    """Bear researcher — argues for lower probability."""
+    """Bear researcher — argues for lower probability using LLM analysis."""
+    estimates = []
+    reasonings = []
+    for key in ["claude_estimate", "gemini_estimate", "gpt_estimate"]:
+        est = state.get(key)
+        if est and isinstance(est, dict):
+            estimates.append(est.get("probability", 0.5))
+            reasonings.append(est.get("reasoning", ""))
+
+    avg = sum(estimates) / len(estimates) if estimates else 0.5
+    context = "; ".join(r for r in reasonings if r)
+
+    try:
+        prompt = (
+            f"You are a bear-case analyst. Given these analyst estimates (avg: {avg:.3f}) "
+            f"and their reasoning: {context[:500]}\n\n"
+            f"Make the strongest case for why the probability should be LOWER than {avg:.3f}. "
+            f"Be specific and cite risks/uncertainties. Keep it to 2-3 sentences."
+        )
+        raw = await _call_router(prompt, tier="fast")
+        bear_case = raw[:500]
+    except Exception as e:
+        logger.warning("Bear case LLM failed: %s", e)
+        bear_case = f"Bear case: factors supporting lower probability (avg: {avg:.3f})"
+
     return {
-        "bear_case": "Bear case: factors supporting lower probability",
+        "bear_case": bear_case,
         "messages": [{"role": "bear", "content": "Bear case argued"}],
     }
 
@@ -134,8 +261,10 @@ def build_consensus_graph() -> Any:
         workflow.add_edge("bear_researcher", "synthesizer")
         workflow.add_edge("synthesizer", END)
 
-        return workflow.compile()
+        graph = workflow.compile()
+        logger.info("LangGraph consensus graph compiled successfully")
+        return graph
 
     except ImportError:
-        logger.info("langgraph not available — consensus graph disabled")
+        logger.warning("langgraph not installed — consensus graph unavailable")
         return None
