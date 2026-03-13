@@ -1,68 +1,87 @@
-# NEXUS AGI — Caddy Reverse Proxy Configuration
-# Replace __DOMAIN__ with your DuckDNS domain (e.g., nexus-elkana.duckdns.org)
+nexus-elkana.duckdns.org {
 
-__DOMAIN__ {
-    # ── Main Dashboard (Next.js on :3000) ────────────────────────────────
-    handle / {
-        reverse_proxy localhost:3000
-    }
-    handle /dashboard/* {
-        reverse_proxy localhost:3000
-    }
-    handle /_next/* {
-        reverse_proxy localhost:3000
-    }
-
-    # ── Command Center API (FastAPI on :8080) ────────────────────────────
-    handle /api/* {
-        reverse_proxy localhost:8080
-    }
-
-    # ── WebSocket (real-time streaming) ──────────────────────────────────
-    handle /ws {
-        reverse_proxy localhost:8080
-    }
-
-    # ── SIGMA Trading Terminal (Streamlit on :8501) ──────────────────────
-    handle /trading/* {
-        uri strip_prefix /trading
-        reverse_proxy localhost:8501
-    }
-
-    # ── LinkedIn Bot Dashboard (on :7860) ────────────────────────────────
-    handle /bot-dashboard/* {
-        uri strip_prefix /bot-dashboard
-        reverse_proxy localhost:7860
-    }
-
-    # ── Lead Gen App (Next.js on :3001 + API on :8082) ─────────────────
-    handle /leadgen/api/* {
-        uri strip_prefix /leadgen
-        reverse_proxy localhost:8082
-    }
-    handle /leadgen* {
-        reverse_proxy localhost:3001
-    }
-
-    # ── Security Headers ─────────────────────────────────────────────────
+    # Security Headers
     header {
+        X-Frame-Options DENY
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin-when-cross-origin
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss: ws:; font-src 'self'"
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        Referrer-Policy "strict-origin-when-cross-origin"
+        X-XSS-Protection "1; mode=block"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
         -Server
     }
 
-    # ── Logging ──────────────────────────────────────────────────────────
-    log {
-        output file /var/log/caddy/access.log {
-            roll_size 10mb
-            roll_keep 5
+    # Rate Limiting (requires caddy-ratelimit plugin)
+    # If caddy-ratelimit is installed, uncomment:
+    # rate_limit {remote.ip} 100r/m
+
+    # Agent Zero — Primary UI
+    handle /ws {
+        reverse_proxy localhost:50001
+    }
+    handle /agent-zero/* {
+        reverse_proxy localhost:50001
+    }
+
+    # LLM Router
+    handle /api/llm/* {
+        reverse_proxy localhost:5100 {
+            health_uri /health
+            health_interval 30s
+            health_timeout 5s
         }
     }
 
-    # ── Default: proxy to Next.js for all other routes ───────────────────
-    handle {
+    # Cost Tracker
+    handle /api/costs/* {
+        reverse_proxy localhost:5200 {
+            health_uri /health
+            health_interval 30s
+            health_timeout 5s
+        }
+    }
+
+    # Claude Adapter
+    handle /api/claude/* {
+        reverse_proxy localhost:5300 {
+            health_uri /health
+            health_interval 30s
+            health_timeout 5s
+        }
+    }
+
+    # Trading API
+    handle /api/trading/* {
+        reverse_proxy localhost:8000 {
+            health_uri /health
+            health_interval 30s
+            health_timeout 5s
+        }
+    }
+
+    # LinkedIn Dashboard
+    handle /dashboard/* {
+        reverse_proxy localhost:7860
+    }
+
+    # Lead Gen Frontend
+    handle /leads/* {
         reverse_proxy localhost:3000
+    }
+
+    # Lead Gen API
+    handle /api/leads/* {
+        reverse_proxy localhost:3001
+    }
+
+    # Health Check Endpoint
+    handle /health {
+        respond "OK" 200
+    }
+
+    # Default -> Agent Zero
+    handle {
+        reverse_proxy localhost:50001
     }
 }
