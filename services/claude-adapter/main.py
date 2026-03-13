@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import time
 import uuid
 from enum import Enum
 from typing import AsyncGenerator
@@ -19,7 +20,7 @@ from pydantic import BaseModel, Field
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Config ───────────────────────────────────────────────────────────────────
+# ── Config ───────────────────────────────────────────────────────────────────────
 
 API_KEY = os.environ.get("CLAUDE_ADAPTER_API_KEY", "")
 CLAUDE_CLI_PATH = os.environ.get("CLAUDE_CODE_CLI_PATH", "claude")
@@ -34,7 +35,7 @@ RISKY_PATTERNS = [
 ]
 
 
-# ── Models ───────────────────────────────────────────────────────────────────
+# ── Models ───────────────────────────────────────────────────────────────────────
 
 class TaskStatus(str, Enum):
     QUEUED = "queued"
@@ -57,22 +58,50 @@ class TaskState(BaseModel):
     pending_approval: str | None = None
 
 
-# ── In-memory store ──────────────────────────────────────────────────────────
+# ── OpenAI-compatible models ─────────────────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str = ""
+
+class ChatCompletionRequest(BaseModel):
+    model: str = "claude-sonnet-4-20250514"
+    messages: list[ChatMessage] = []
+    temperature: float | None = None
+    max_tokens: int | None = None
+    stream: bool = False
+
+class ChatCompletionChoice(BaseModel):
+    index: int = 0
+    message: ChatMessage
+    finish_reason: str = "stop"
+
+class UsageInfo(BaseModel):
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+class ChatCompletionResponse(BaseModel):
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: list[ChatCompletionChoice]
+    usage: UsageInfo = UsageInfo()
+
+
+# ── In-memory store ──────────────────────────────────────────────────────────────
 
 _tasks: dict[str, TaskState] = {}
 _approval_events: dict[str, asyncio.Event] = {}
 _approval_decisions: dict[str, bool] = {}
 
 
-# ── App ──────────────────────────────────────────────────────────────────────
+# ── App ────────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Claude Code Adapter", version="1.0.0")
+app = FastAPI(title="Claude Code Adapter", version="1.1.0")
 
-cors_origins = os.environ.get(
-    "CLAUDE_ADAPTER_CORS_ORIGINS",
-    "http://localhost:50001,http://127.0.0.1:50001",
-).split(",")
-
+cors_origins = os.environ.get("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in cors_origins],
@@ -87,7 +116,7 @@ def _verify_api_key(x_api_key: str = Header("")) -> None:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────────────────
 
 def _extract_content(event: dict) -> str:
     event_type = event.get("type", "")
@@ -183,7 +212,7 @@ async def _run_claude_task(task_id: str, prompt: str, working_dir: str, max_turn
         logger.exception("Task %s failed", task_id)
 
 
-# ── SSE stream ───────────────────────────────────────────────────────────────
+# ── SSE stream ───────────────────────────────────────────────────────────────────
 
 async def _sse_generator(task_id: str) -> AsyncGenerator[str, None]:
     last_len = 0
@@ -209,7 +238,141 @@ async def _sse_generator(task_id: str) -> AsyncGenerator[str, None]:
         await asyncio.sleep(0.3)
 
 
-# ── Routes ───────────────────────────────────────────────────────────────────
+# ── OpenAI-compatible helper ───────────────────────────────────────────────────────
+
+def _messages_to_prompt(messages: list[ChatMessage]) -> str:
+    """Convert OpenAI-style messages array to a single prompt string for Claude CLI."""
+    parts = []
+    for msg in messages:
+        if msg.role == "system":
+            parts.append(f"[System instructions]: {msg.content}")
+        elif msg.role == "user":
+            parts.append(msg.content)
+        elif msg.role == "assistant":
+            parts.append(f"[Previous assistant response]: {msg.content}")
+    return "\n\n".join(parts)
+
+
+async def _run_claude_sync(prompt: str, max_turns: int = 5) -> str:
+    """Run Claude CLI synchronously (wait for completion) and return the output text."""
+    cli_path = shutil.which(CLAUDE_CLI_PATH) or CLAUDE_CLI_PATH
+    cmd = [
+        cli_path,
+        "--print",
+        "--output-format", "stream-json",
+        "--max-turns", str(max_turns),
+        prompt,
+    ]
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=DEFAULT_WORKING_DIR,
+        )
+
+        output_parts = []
+        assert process.stdout is not None
+        async for raw_line in process.stdout:
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+                content = _extract_content(event)
+            except json.JSONDecodeError:
+                content = line
+            if content:
+                output_parts.append(content)
+
+        await process.wait()
+
+        if process.returncode != 0 and process.stderr:
+            stderr_bytes = await process.stderr.read()
+            stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
+            if stderr_text and not output_parts:
+                return f"[Error] {stderr_text}"
+
+        return "".join(output_parts) or "[No output from Claude CLI]"
+
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="Claude CLI not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+async def _stream_claude_sse(prompt: str, model: str, max_turns: int = 5) -> AsyncGenerator[str, None]:
+    """Stream Claude CLI output as OpenAI-compatible SSE chunks."""
+    cli_path = shutil.which(CLAUDE_CLI_PATH) or CLAUDE_CLI_PATH
+    cmd = [
+        cli_path,
+        "--print",
+        "--output-format", "stream-json",
+        "--max-turns", str(max_turns),
+        prompt,
+    ]
+
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    created = int(time.time())
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=DEFAULT_WORKING_DIR,
+        )
+
+        assert process.stdout is not None
+        async for raw_line in process.stdout:
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+                content = _extract_content(event)
+            except json.JSONDecodeError:
+                content = line
+
+            if content:
+                chunk = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"content": content},
+                        "finish_reason": None,
+                    }],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n"
+
+        # Send final chunk with finish_reason
+        final_chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "stop",
+            }],
+        }
+        yield f"data: {json.dumps(final_chunk)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    except Exception as exc:
+        error_chunk = {
+            "error": {"message": str(exc), "type": "server_error"},
+        }
+        yield f"data: {json.dumps(error_chunk)}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+# ── Routes ───────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 async def health() -> dict[str, str]:
@@ -220,6 +383,71 @@ async def health() -> dict[str, str]:
         "cli_path": cli_path or "not found",
     }
 
+
+# ── OpenAI-compatible endpoints ────────────────────────────────────────────────────
+
+@app.get("/v1/models")
+async def list_models():
+    """OpenAI-compatible model listing."""
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "claude-sonnet-4-20250514",
+                "object": "model",
+                "created": 1700000000,
+                "owned_by": "anthropic",
+            },
+        ],
+    }
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(req: ChatCompletionRequest):
+    """
+    OpenAI-compatible chat completions endpoint.
+
+    Translates OpenAI chat format -> Claude CLI prompt -> OpenAI response format.
+    This allows Agent Zero (via LiteLLM) to talk to Claude CLI through the sub plan.
+    """
+    logger.info("OpenAI-compat request: model=%s, messages=%d, stream=%s",
+                req.model, len(req.messages), req.stream)
+
+    prompt = _messages_to_prompt(req.messages)
+
+    if not prompt.strip():
+        raise HTTPException(status_code=400, detail="No messages provided")
+
+    max_turns = 5  # Keep it lean for chat completions
+
+    if req.stream:
+        return StreamingResponse(
+            _stream_claude_sse(prompt, req.model, max_turns),
+            media_type="text/event-stream",
+        )
+
+    # Synchronous mode: run Claude CLI and wait for full output
+    output = await _run_claude_sync(prompt, max_turns)
+
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    return ChatCompletionResponse(
+        id=completion_id,
+        created=int(time.time()),
+        model=req.model,
+        choices=[
+            ChatCompletionChoice(
+                message=ChatMessage(role="assistant", content=output),
+            )
+        ],
+        usage=UsageInfo(
+            prompt_tokens=len(prompt) // 4,
+            completion_tokens=len(output) // 4,
+            total_tokens=(len(prompt) + len(output)) // 4,
+        ),
+    )
+
+
+# ── Original task-based routes ─────────────────────────────────────────────────────
 
 @app.post("/task", response_model=TaskState)
 async def create_task(req: TaskRequest, x_api_key: str = Header("")) -> TaskState:
