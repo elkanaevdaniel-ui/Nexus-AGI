@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "command": "python3 -c \"import ast, sys; ast.parse(open(sys.argv[1]).read())\" \"$FILEPATH\" 2>&1 || echo 'SYNTAX ERROR — fix before continuing'",
+        "description": "Syntax-check Python files after every edit"
+      },
+      {
+        "matcher": "Edit|Write",
+        "command": "grep -n 'import requests' \"$FILEPATH\" && echo 'WARNING: Use httpx instead of requests (see CLAUDE.md)' || true",
+        "description": "Flag sync requests usage"
+      }
+    ],
+    "PreCommit": [
+      {
+        "command": "grep -rn 'import requests' --include='*.py' . && echo 'BLOCKED: Replace requests with httpx before committing' && exit 1 || true",
+        "description": "Block commits with sync requests"
+      },
+      {
+        "command": "grep -rn 'f\".*{.*}.*sql\\|f\".*{.*}.*SQL\\|f\".*{.*}.*SELECT\\|f\".*{.*}.*INSERT\\|f\".*{.*}.*UPDATE\\|f\".*{.*}.*DELETE' --include='*.py' . && echo 'WARNING: Possible SQL injection — review f-strings in SQL' || true",
+        "description": "Scan for SQL injection patterns"
+      }
+    ],
+    "PostCommit": [
+      {
+        "command": "echo '\n=== REMINDER: Update CLAUDE.md LEARNED rules if this commit fixes a bug ==='",
+        "description": "Remind to update LEARNED rules after each commit"
+      }
+    ]
+  }
+}
+
