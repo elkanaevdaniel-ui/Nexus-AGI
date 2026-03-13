@@ -1,6 +1,17 @@
+"""database.py - SQLite database layer for LinkedIn bot.
+
+Security: All column names are validated against a whitelist to prevent SQL injection.
+"""
 import sqlite3
 from config import DB_PATH
 from datetime import datetime
+
+
+# Column whitelist for SQL injection prevention
+POSTS_ALLOWED_COLUMNS = frozenset({
+    "topic", "article_title", "article_url", "post_text",
+    "image_url", "image_path", "status", "approved_at",
+})
 
 
 def get_conn():
@@ -38,9 +49,10 @@ def init_db():
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS weekly_schedule (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        week_start TEXT UNIQUE,
+        week_start TEXT,
         topic TEXT,
-        topic_index INTEGER
+        topic_index INTEGER,
+        created_at TEXT
     )""")
     conn.commit()
     conn.close()
@@ -50,9 +62,9 @@ def save_post(topic, article_title, article_url, post_text, image_url, image_pat
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-        """INSERT INTO posts (created_at, topic, article_title, article_url, post_text, image_url, image_path)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (datetime.now().isoformat(), topic, article_title, article_url, post_text, image_url, image_path)
+        "INSERT INTO posts (created_at, topic, article_title, article_url, post_text, image_url, image_path, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')",
+        (datetime.now().isoformat(), topic, article_title, article_url, post_text, image_url, image_path),
     )
     post_id = c.lastrowid
     conn.commit()
@@ -70,9 +82,13 @@ def get_post(post_id):
 
 
 def update_post(post_id, **kwargs):
+    """Update post fields. Only whitelisted column names are allowed to prevent SQL injection."""
     conn = get_conn()
     c = conn.cursor()
     for key, value in kwargs.items():
+        if key not in POSTS_ALLOWED_COLUMNS:
+            conn.close()
+            raise ValueError(f"Invalid column name: {key!r}. Allowed: {sorted(POSTS_ALLOWED_COLUMNS)}")
         c.execute(f"UPDATE posts SET {key}=? WHERE id=?", (value, post_id))
     conn.commit()
     conn.close()
@@ -81,16 +97,16 @@ def update_post(post_id, **kwargs):
 def get_recent_topics(limit=10):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT topic FROM posts ORDER BY created_at DESC LIMIT ?", (limit,))
-    topics = [row[0] for row in c.fetchall()]
+    c.execute("SELECT topic FROM posts ORDER BY id DESC LIMIT ?", (limit,))
+    rows = c.fetchall()
     conn.close()
-    return topics
+    return [r["topic"] for r in rows]
 
 
 def get_all_posts(limit=50):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT * FROM posts ORDER BY created_at DESC LIMIT ?", (limit,))
+    c.execute("SELECT * FROM posts ORDER BY id DESC LIMIT ?", (limit,))
     rows = c.fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -99,7 +115,7 @@ def get_all_posts(limit=50):
 def get_posts_by_status(status, limit=50):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT * FROM posts WHERE status=? ORDER BY created_at DESC LIMIT ?", (status, limit))
+    c.execute("SELECT * FROM posts WHERE status=? ORDER BY id DESC LIMIT ?", (status, limit))
     rows = c.fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -108,14 +124,16 @@ def get_posts_by_status(status, limit=50):
 def get_stats():
     conn = get_conn()
     c = conn.cursor()
-    today = datetime.now().strftime("%Y-%m-%d")
-    week_str = datetime.now().strftime("%Y-W%W")
-    c.execute("SELECT COUNT(*) FROM posts"); total = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM posts WHERE status='approved'"); approved = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM posts WHERE date(created_at)=?", (today,)); today_cnt = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM posts WHERE strftime('%Y-W%W', created_at)=?", (week_str,)); week_cnt = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) as total FROM posts")
+    total = c.fetchone()["total"]
+    c.execute("SELECT COUNT(*) as published FROM posts WHERE status='published'")
+    published = c.fetchone()["published"]
+    c.execute("SELECT COUNT(*) as draft FROM posts WHERE status='draft'")
+    draft = c.fetchone()["draft"]
+    c.execute("SELECT COUNT(*) as approved FROM posts WHERE status='approved'")
+    approved = c.fetchone()["approved"]
     conn.close()
-    return {"total": total, "approved": approved, "today": today_cnt, "this_week": week_cnt}
+    return {"total": total, "published": published, "draft": draft, "approved": approved}
 
 
 def delete_post(post_id):
@@ -126,14 +144,13 @@ def delete_post(post_id):
     conn.close()
 
 
-# ── Analytics ────────────────────────────────────────────────────────────────
-
 def save_analytics(post_id, views, likes, comments, shares, ctr, notes=""):
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO analytics (post_id, date, views, likes, comments, shares, ctr, notes) VALUES (?,?,?,?,?,?,?,?)",
-        (post_id, datetime.now().strftime("%Y-%m-%d"), views, likes, comments, shares, ctr, notes)
+        "INSERT INTO analytics (post_id, date, views, likes, comments, shares, ctr, notes) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (post_id, datetime.now().isoformat(), views, likes, comments, shares, ctr, notes),
     )
     conn.commit()
     conn.close()
@@ -142,12 +159,7 @@ def save_analytics(post_id, views, likes, comments, shares, ctr, notes=""):
 def get_analytics(limit=100):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("""
-        SELECT a.*, p.topic as post_topic, p.article_title
-        FROM analytics a
-        LEFT JOIN posts p ON a.post_id = p.id
-        ORDER BY a.date DESC LIMIT ?
-    """, (limit,))
+    c.execute("SELECT * FROM analytics ORDER BY id DESC LIMIT ?", (limit,))
     rows = c.fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -162,14 +174,12 @@ def get_post_analytics(post_id):
     return [dict(r) for r in rows]
 
 
-# ── Weekly Schedule ───────────────────────────────────────────────────────────
-
 def save_weekly_schedule(week_start, topic, topic_index):
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-        "INSERT OR REPLACE INTO weekly_schedule (week_start, topic, topic_index) VALUES (?,?,?)",
-        (week_start, topic, topic_index)
+        "INSERT INTO weekly_schedule (week_start, topic, topic_index, created_at) VALUES (?, ?, ?, ?)",
+        (week_start, topic, topic_index, datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()
@@ -178,12 +188,7 @@ def save_weekly_schedule(week_start, topic, topic_index):
 def get_current_schedule():
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT * FROM weekly_schedule ORDER BY week_start DESC LIMIT 1")
-    row = c.fetchone()
+    c.execute("SELECT * FROM weekly_schedule ORDER BY id DESC LIMIT 7")
+    rows = c.fetchall()
     conn.close()
-    return dict(row) if row else None
-
-
-if __name__ == "__main__":
-    init_db()
-    print("Database initialized OK")
+    return [dict(r) for r in rows]
