@@ -159,6 +159,16 @@ ALL_MODELS: list[ModelConfig] = [
         max_context_tokens=128_000,
     ),
     ModelConfig(
+        model_id="nvidia/nemotron-3-super-120b-a12b-fast",
+        display_name="Nemotron 3 Super (Fast)",
+        provider=Provider.NVIDIA_NIM,
+        tier=ModelTier.FAST,
+        cost_per_1k_input=0.0003,
+        cost_per_1k_output=0.0012,
+        max_context_tokens=128_000,
+        supports_vision=False,
+    ),
+    ModelConfig(
         model_id="nvidia/nemotron-3-super-120b-a12b",
         display_name="Nemotron 3 Super",
         provider=Provider.NVIDIA_NIM,
@@ -176,6 +186,7 @@ ALL_MODELS: list[ModelConfig] = [
 
 FALLBACK_CHAINS: dict[ModelTier, list[str]] = {
     ModelTier.FAST: [
+        "nvidia/nemotron-3-super-120b-a12b-fast",
         "gemini-2.5-flash",
         "gemini-1.5-flash",
         "claude-haiku-4-5",

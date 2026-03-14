@@ -17,6 +17,7 @@ class ConsensusState(TypedDict):
     gemini_estimate: Optional[dict]
     gpt_estimate: Optional[dict]
     nemotron_estimate: Optional[dict]
+    arbitration_result: Optional[dict]
     bull_case: str
     bear_case: str
     consensus_probability: float

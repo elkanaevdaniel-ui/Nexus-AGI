@@ -416,7 +416,7 @@ class LiteLLMChatWrapper(SimpleChatModel):
         for chunk in completion(
             model=self.model_name,
             messages=msgs,
-            stream=False,  # NEXUS: force non-streaming
+            stream=True,
             stop=stop,
             **{**self.kwargs, **kwargs},
         ):
@@ -447,7 +447,7 @@ class LiteLLMChatWrapper(SimpleChatModel):
         response = await acompletion(
             model=self.model_name,
             messages=msgs,
-            stream=False,  # NEXUS: force non-streaming
+            stream=True,
             stop=stop,
             **{**self.kwargs, **kwargs},
         )
@@ -508,11 +508,14 @@ class LiteLLMChatWrapper(SimpleChatModel):
         while True:
             got_any_chunk = False
             try:
+                # NEXUS: force non-streaming for claude-adapter
+                stream = False
+                call_kwargs.pop("stream", None)
                 # call model
                 _completion = await acompletion(
                     model=self.model_name,
                     messages=msgs_conv,
-                    stream=False,  # NEXUS: force non-streaming for claude-adapter
+                    stream=stream,
                     **call_kwargs,
                 )
 

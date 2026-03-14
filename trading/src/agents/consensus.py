@@ -248,6 +248,129 @@ async def synthesize_consensus(state: ConsensusState) -> dict:
     }
 
 
+
+async def nemotron_arbitrate(state: ConsensusState) -> dict:
+    """Nemotron meta-arbitrator: resolves split votes using full context.
+    
+    When analysts disagree (no 3/4 majority), Nemotron reviews ALL estimates
+    with its 1M context window and makes the final call with structured reasoning.
+    """
+    estimates = {}
+    for key in ["claude_estimate", "gemini_estimate", "gpt_estimate", "nemotron_estimate"]:
+        if key in state and state[key]:
+            estimates[key] = state[key]
+    
+    # Check if there is a clear majority (3+ agree on direction)
+    bullish = sum(1 for e in estimates.values() if e.get("probability", 0.5) > 0.6)
+    bearish = sum(1 for e in estimates.values() if e.get("probability", 0.5) < 0.4)
+    
+    if bullish >= 3 or bearish >= 3:
+        # Clear consensus - no arbitration needed
+        return {"messages": [{"role": "arbitrator", "content": "Clear consensus, no arbitration needed"}]}
+   p y
+t h o n 3#  <S<p l'iEtO Fv'o
+tfe= o-p eNne(m'ottrraodni nagr/bsirtcr/aatgeesn twsi/tcho nfsuelnls ucso.nptye'x)t;
+  c = f .prreoamdp(t) ;=  ff."c"l"oYsoeu( )a
+r
+e#  tAhded  caornbsietnrsautso ra rfbuintcrtaitoonr  bfeofro rae  mbuulitlid-_LcLoMn sternasduisn_gg rsaypsht
+eamr.b
+=T'h'e' 
+aansaylnycs tdse fh anveem oStPrLoInT_ aornb itthriast et(rsatdaet.e :R eCvoineswe nasluls Setsattiem)a t-e>s  daincdt :m
+a k e   t"h"e" Nfeimnoatlr ocna lmle.t
+a
+-AaNrAbLiYtSrTa tEoSrT:I MrAeTsEoSl:v
+e{sc hsrp(l1i0t) .vjootiens( fu"s-i n{gk }f:u lplr ocboanbtielxitt.y
+= { v . g
+e t ( ' pWrhoebna bainlailtyys't,s  'dNi/sAa'g)r}e,e  c(onnof i3d/e4n cmea=j{ovr.igteyt)(,' cNoenmfoitdreonnc er'e,v i'eNw/sA 'A)L}L,  ersetaismoantiensg
+= { v . gweitt(h' rietass o1nMi ncgo'n,t e'xNt/ Aw'i)n}d"o wf oarn dk ,m avk eisn  tehset ifmiantaels .ciatlelm sw(i)t)h} 
+s
+tMrAuRcKtEuTr eCdO NrTeEaXsTo:n
+i{nsgt.a
+t e . g e"t"("'
+m a r k eets_tdiamtaat'e,s  '=N o{ }a
+d d i t ifoonra lk emya rikne t[ "dcaltaau'd)e}_
+e
+sYtOiUmRa tTeA"S,K :"
+g1e.m iIndie_netsitfiym awthei"c,h  "agnpatl_yesstt ihmaast et"h,e  "sntermoontgreosnt_ ersetaismoantien"g]
+:2
+.   I d e n t i fiyf  lkoegyi cianl  sftlaatwes  ainnd  dsitsasteen[tkienyg] :o
+p i n i o n s     
+ 3 .  ePsrtoivmiadtee sy[okuery ]F I=N AsLt aptreo[bkaebyi]l
+i t y   (
+0 - 1 )  #a nCdh eccokn fiifd etnhceer e( liosw /am ecdlieuamr/ hmiagjho)r
+i4t.y  E(x3p+l aaignr eyeo uorn  adribrietcrtaitoino)n
+  r e a sbounlilnigs hi n=  2s-u3m (s1e nftoern cee si
+n
+ Reesstpiomnadt eass. vJaSlOuNe:s ({){ "iffi nea.lg_eptr(o"bparboiblaibtiyl"i:t y0".,X ,0 ."5f)i n>a l0_.c6o)n
+f i d e nbceea"r:i s"h. .=. "s,u m"(a1r bfiotrr aet iionn _ersetaismoantiensg."v:a l"u.e.s.("),  i"fs ter.ognegte(s"tp_raonbaalbyislti"t:y "",. .0.."5})} "<" "0
+.
+4 ) 
+    t r y
+: 
+      i f   b u lrlaiws h=  >a=w a3i to r_ cbaelalr_irsohu t>e=r (3p:r
+o m p t ,   t i e#r =C"ldeeaerp "c,o npsreenfseursr e-d _npor oavribdietrr=a"tnivoind inae_endiemd"
+) 
+              r eitmupronr t{ "jmseosns
+a g e s " :   [ {r"ersoullet" :=  "jasrobni.tlroaatdosr("r,a w")c oinft einsti"n:s t"aCnlceea(rr acwo,n ssetnrs)u se,l sneo  raarwb
+i t r a t i o n  rneeteudrend "{}
+] } 
+         
+         #" aSrpbliittr avtoitoen _-r eNseumlott"r:o nr easrublitt,r
+a t e s   w i t h   f u l"lm ecsosnatgeexst"
+:   [ { "prroolmep"t:  =" afr"b"i"tYroaut oarr"e, 
+t h e   c o n s e n s u s   a r b i t r a t o r   f o"rc oan tmeunltt"i:- LfL"MA rtbriatdriantgi osny:s tpe=m{.r
+eTshuel ta.ngaelty(s'tfsi nhaalv_ep rSoPbLaIbTi loint yt'h,i s0 .t5r)a}d,e .{ rReesvuiletw. gaeltl( 'easrtbiimtartaetsi oann_dr emaaskoen itnhge' ,f i'n'a)l} "c}a]l,l
+. 
+ 
+ A N A L Y S}T
+  E S T IeMxAcTeEpSt: 
+E{xccherp(t1i0o)n. jaosi ne(:f
+" -   { k } :   plroogbgaebri.leirtryo=r{(v".Ngeemto(t'rporno baarbbiiltirtayt'i,o n' Nf/aAi'l)e}d,:  c%osn"f,i dee)n
+c e = { v . g e tr(e'tcuornnf i{d
+e n c e ' ,   ' N / A ' )"}a,r brietarsaotniionng_=r{evs.uglett"(:' r{e"afsionnailn_gp'r,o b'aNb/iAl'i)t}y"" :f o0r. 5k,,  "vf iinna le_sctoinmfaitdeesn.ciet"e:m s"(l)o)w}"
+,
+
+M A R K E T   C O N T E X T : 
+ { s t a t e . g e t ( ' m a r k e t _ d"aatrab'i,t r'aNtoi oand_drietaisoonnailn gm"a:r kfe"tA rdbaittar'a)t}i
+o
+nY OfUaRi lTeAdS:K :{
+e1}." }I,d
+e n t i f y   w h i c h  "amneaslsyasgte sh"a:s  [t{h"er oslter"o:n g"easrtb irteraastoonri"n,g 
+"2c.o nItdeenntt"i:f yf "lAorgbiictarla tfiloanw sf aiinl eddi:s s{een}t"i}n]g, 
+o p i n i o n s  } 
+
+
+3'.' 'P
+r
+oivfi d'en eymooutrr oFnI_NaArLb iptrroabtaeb'i lniotty  i(n0 -c1:)
+  a n d  cc o=n fci.dreenpclea c(el(o'wd/emfe dbiuuiml/dh_icgohn)s
+e4n.s uEsx_pglraaipnh 'y,o uarr ba r+b i'tdreaft ibouni lrde_acsoonnsienngs uisn_ g2r-a3p hs'e)n
+t e n c efs=
+o
+pReens(p'otnrda daisn gJ/SsOrNc:/ a{g{e"nftisn/aclo_npsreonbsaubsi.lpiyt'y,"':w '0).;X ,f ."wfriintael(_cc)o;n ffi.dcelnocsee"(:) 
+" . . . "p,r i"natr(b'iOtKr-aatriboint_rraetaosro'n)i
+negl"s:e :"
+. . . " ,p r"isnttr(o'nSgKeIsPt-_aarnbailtyrsatt"o:r '").
+.E.O"F}
+}"""
+
+    try:
+        raw = await _call_router(prompt, tier="deep", preferred_provider="nvidia_nim")
+        import json
+        result = json.loads(raw) if isinstance(raw, str) else raw
+        return {
+            "arbitration_result": result,
+            "messages": [{"role": "arbitrator",
+                          "content": f"Arbitration: p={result.get('final_probability', 0.5)}, {result.get('arbitration_reasoning', '')}"}],
+        }
+    except Exception as e:
+        logger.error("Nemotron arbitration failed: %s", e)
+        return {
+            "arbitration_result": {"final_probability": 0.5, "final_confidence": "low",
+                                   "arbitration_reasoning": f"Arbitration failed: {e}"},
+            "messages": [{"role": "arbitrator", "content": f"Arbitration failed: {e}"}],
+        }
+
 def build_consensus_graph() -> Any:
     """Build the LangGraph consensus workflow.
 
@@ -279,7 +402,9 @@ def build_consensus_graph() -> Any:
         workflow.add_edge("nemotron_analyst", "bull_researcher")
         workflow.add_edge("bull_researcher", "bear_researcher")
         workflow.add_edge("bear_researcher", "synthesizer")
-        workflow.add_edge("synthesizer", END)
+        workflow.add_node("arbitrator", nemotron_arbitrate)
+        workflow.add_edge("synthesizer", "arbitrator")
+        workflow.add_edge("arbitrator", END)
 
         graph = workflow.compile()
         logger.info("LangGraph consensus graph compiled successfully")

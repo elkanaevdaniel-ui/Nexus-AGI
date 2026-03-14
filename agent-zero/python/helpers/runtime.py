@@ -64,7 +64,7 @@ def is_development() -> bool:
 def get_local_url():
     if is_dockerized():
         return "host.docker.internal"
-    return "127.0.0.1"
+    return "0.0.0.0"
 
 
 def get_runtime_id() -> str:

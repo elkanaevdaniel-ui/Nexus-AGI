@@ -169,7 +169,7 @@ async def _run_claude_task(task_id: str, prompt: str, working_dir: str, max_turn
             try:
                 event = json.loads(line)
                 content = _extract_content(event) if isinstance(event, dict) else str(event)
-            except (json.JSONDecodeError, AttributeError, TypeError):
+            except json.JSONDecodeError:
                 content = line
 
             if content:
@@ -293,7 +293,7 @@ async def _run_claude_sync(prompt: str, max_turns: int = 5, system_prompt: str =
             try:
                 event = json.loads(line)
                 content = _extract_content(event) if isinstance(event, dict) else str(event)
-            except (json.JSONDecodeError, AttributeError, TypeError):
+            except json.JSONDecodeError:
                 content = line
             if content:
                 output_parts.append(content)
@@ -346,7 +346,7 @@ async def _stream_claude_sse(prompt: str, model: str, max_turns: int = 5, system
             try:
                 event = json.loads(line)
                 content = _extract_content(event) if isinstance(event, dict) else str(event)
-            except (json.JSONDecodeError, AttributeError, TypeError):
+            except json.JSONDecodeError:
                 content = line
 
             if content:
@@ -457,8 +457,7 @@ async def chat_completions(req: ChatCompletionRequest):
     ok, msg = budget.check_budget()
     if not ok:
         raise HTTPException(status_code=429, detail=msg)
-    simple_sp = "You are a helpful AI assistant. ALWAYS respond in this exact JSON format only: {\"thoughts\": [\"reasoning\"], \"headline\": \"summary\", \"tool_name\": \"response\", \"tool_args\": {\"text\": \"your answer\"}}. Focus on answering the user."
-    output = await _run_claude_sync(user_prompt, max_turns, system_prompt=simple_sp)
+    output = await _run_claude_sync(user_prompt, max_turns, system_prompt=system_prompt)
 
     # Fallback: wrap plain text in Agent Zero JSON format
     _os = output.strip()
