@@ -62,7 +62,7 @@ class TaskState(BaseModel):
 
 class ChatMessage(BaseModel):
     role: str
-    content: str = ""
+    content: str | list | None = ""
 
 class ChatCompletionRequest(BaseModel):
     model: str = "claude-sonnet-4-6"
@@ -118,7 +118,9 @@ def _verify_api_key(x_api_key: str = Header("")) -> None:
 
 # ── Helpers ──────────────────────────────────────────────────────────────────────
 
-def _extract_content(event: dict) -> str:
+def _extract_content(event) -> str:
+    if not isinstance(event, dict):
+        return str(event) if event else ""
     event_type = event.get("type", "")
     if event_type == "assistant":
         content = event.get("content", "")
@@ -165,7 +167,7 @@ async def _run_claude_task(task_id: str, prompt: str, working_dir: str, max_turn
                 continue
             try:
                 event = json.loads(line)
-                content = _extract_content(event)
+                content = _extract_content(event) if isinstance(event, dict) else str(event)
             except json.JSONDecodeError:
                 content = line
 
@@ -246,6 +248,11 @@ def _messages_to_prompt(messages: list[ChatMessage]) -> tuple[str, str]:
     """Convert OpenAI-style messages array to a single prompt string for Claude CLI."""
     sp, up = [], []
     for msg in messages:
+        _c = msg.content
+        if isinstance(_c, list):
+            msg.content = " ".join(b.get("text","") if isinstance(b,dict) else str(b) for b in _c)
+        elif not isinstance(_c, str):
+            msg.content = str(_c or "")
         if msg.role == "system":
             sp.append(msg.content)
         elif msg.role == "user":
@@ -262,9 +269,11 @@ async def _run_claude_sync(prompt: str, max_turns: int = 5, system_prompt: str =
         cli_path,
         "--print",
         "--max-turns", str(max_turns),
-        prompt,
     ]
 
+    if system_prompt:
+        cmd.extend(["--system-prompt", system_prompt])
+    cmd.append(prompt)
     try:
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -282,7 +291,7 @@ async def _run_claude_sync(prompt: str, max_turns: int = 5, system_prompt: str =
                 continue
             try:
                 event = json.loads(line)
-                content = _extract_content(event)
+                content = _extract_content(event) if isinstance(event, dict) else str(event)
             except json.JSONDecodeError:
                 content = line
             if content:
@@ -335,7 +344,7 @@ async def _stream_claude_sse(prompt: str, model: str, max_turns: int = 5, system
                 continue
             try:
                 event = json.loads(line)
-                content = _extract_content(event)
+                content = _extract_content(event) if isinstance(event, dict) else str(event)
             except json.JSONDecodeError:
                 content = line
 
