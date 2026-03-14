@@ -65,7 +65,7 @@ class ChatMessage(BaseModel):
     content: str = ""
 
 class ChatCompletionRequest(BaseModel):
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-opus-4-6"
     messages: list[ChatMessage] = []
     temperature: float | None = None
     max_tokens: int | None = None
@@ -142,17 +142,20 @@ async def _run_claude_task(task_id: str, prompt: str, working_dir: str, max_turn
     cli_path = shutil.which(CLAUDE_CLI_PATH) or CLAUDE_CLI_PATH
     cmd = [
         cli_path,
-        "--print",
+        "--print", "--verbose",
         "--output-format", "stream-json",
         "--max-turns", str(max_turns),
-        prompt,
     ]
+    if system_prompt:
+        cmd.extend(["--system-prompt", system_prompt])
+    cmd.append(prompt)
 
     try:
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
             cwd=working_dir,
         )
 
@@ -240,25 +243,25 @@ async def _sse_generator(task_id: str) -> AsyncGenerator[str, None]:
 
 # ── OpenAI-compatible helper ───────────────────────────────────────────────────────
 
-def _messages_to_prompt(messages: list[ChatMessage]) -> str:
+def _messages_to_prompt(messages: list[ChatMessage]) -> tuple[str, str]:
     """Convert OpenAI-style messages array to a single prompt string for Claude CLI."""
-    parts = []
+    sp, up = [], []
     for msg in messages:
         if msg.role == "system":
-            parts.append(f"[System instructions]: {msg.content}")
+            sp.append(msg.content)
         elif msg.role == "user":
-            parts.append(msg.content)
+            up.append(msg.content)
         elif msg.role == "assistant":
-            parts.append(f"[Previous assistant response]: {msg.content}")
-    return "\n\n".join(parts)
+            up.append(f"[Previous assistant response]: {msg.content}")
+    return "\n\n".join(sp), "\n\n".join(up)
 
 
-async def _run_claude_sync(prompt: str, max_turns: int = 5) -> str:
+async def _run_claude_sync(prompt: str, max_turns: int = 5, system_prompt: str = "") -> str:
     """Run Claude CLI synchronously (wait for completion) and return the output text."""
     cli_path = shutil.which(CLAUDE_CLI_PATH) or CLAUDE_CLI_PATH
     cmd = [
         cli_path,
-        "--print",
+        "--print", "--verbose",
         "--output-format", "stream-json",
         "--max-turns", str(max_turns),
         prompt,
@@ -269,6 +272,7 @@ async def _run_claude_sync(prompt: str, max_turns: int = 5) -> str:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
             cwd=DEFAULT_WORKING_DIR,
         )
 
@@ -302,16 +306,18 @@ async def _run_claude_sync(prompt: str, max_turns: int = 5) -> str:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-async def _stream_claude_sse(prompt: str, model: str, max_turns: int = 5) -> AsyncGenerator[str, None]:
+async def _stream_claude_sse(prompt: str, model: str, max_turns: int = 5, system_prompt: str = "") -> AsyncGenerator[str, None]:
     """Stream Claude CLI output as OpenAI-compatible SSE chunks."""
     cli_path = shutil.which(CLAUDE_CLI_PATH) or CLAUDE_CLI_PATH
     cmd = [
         cli_path,
-        "--print",
+        "--print", "--verbose",
         "--output-format", "stream-json",
         "--max-turns", str(max_turns),
-        prompt,
     ]
+    if system_prompt:
+        cmd.extend(["--system-prompt", system_prompt])
+    cmd.append(prompt)
 
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
@@ -321,6 +327,7 @@ async def _stream_claude_sse(prompt: str, model: str, max_turns: int = 5) -> Asy
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
             cwd=DEFAULT_WORKING_DIR,
         )
 
@@ -393,7 +400,7 @@ async def list_models():
         "object": "list",
         "data": [
             {
-                "id": "claude-sonnet-4-20250514",
+                "id": "claude-opus-4-6",
                 "object": "model",
                 "created": 1700000000,
                 "owned_by": "anthropic",
@@ -413,21 +420,30 @@ async def chat_completions(req: ChatCompletionRequest):
     logger.info("OpenAI-compat request: model=%s, messages=%d, stream=%s",
                 req.model, len(req.messages), req.stream)
 
-    prompt = _messages_to_prompt(req.messages)
+    system_prompt, user_prompt = _messages_to_prompt(req.messages)
 
-    if not prompt.strip():
+    if not user_prompt.strip():
         raise HTTPException(status_code=400, detail="No messages provided")
 
     max_turns = 5  # Keep it lean for chat completions
 
     if req.stream:
         return StreamingResponse(
-            _stream_claude_sse(prompt, req.model, max_turns),
+            _stream_claude_sse(user_prompt, req.model, max_turns, system_prompt=system_prompt),
             media_type="text/event-stream",
         )
 
     # Synchronous mode: run Claude CLI and wait for full output
-    output = await _run_claude_sync(prompt, max_turns)
+    output = await _run_claude_sync(user_prompt, max_turns, system_prompt=system_prompt)
+
+    # Fallback: wrap plain text in Agent Zero JSON format
+    _os = output.strip()
+    if _os:
+        try:
+            _pp = json.loads(_os)
+            if not (isinstance(_pp, dict) and "tool_name" in _pp): raise ValueError()
+        except Exception:
+            output = json.dumps({"thoughts":["Direct response."],"headline":"Responding to user","tool_name":"response","tool_args":{"text":_os}})
 
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     return ChatCompletionResponse(
@@ -440,9 +456,9 @@ async def chat_completions(req: ChatCompletionRequest):
             )
         ],
         usage=UsageInfo(
-            prompt_tokens=len(prompt) // 4,
+            prompt_tokens=len(user_prompt) // 4,
             completion_tokens=len(output) // 4,
-            total_tokens=(len(prompt) + len(output)) // 4,
+            total_tokens=(len(user_prompt) + len(output)) // 4,
         ),
     )
 

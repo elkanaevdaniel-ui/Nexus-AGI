@@ -499,7 +499,7 @@ input[type="range"]::-moz-range-thumb {
   }
 }
 
-.loading::before {
+.loading-disabled::before {
   content: "";
   position: absolute;
   top: 0;
@@ -602,3 +602,4 @@ input[type="range"]::-moz-range-thumb {
   padding: 1em 1.25em;
   border-top: 1px solid var(--color-border);
 }
+.loading::before { display: none !important; } .loading { background: transparent !important; color: inherit !important; }

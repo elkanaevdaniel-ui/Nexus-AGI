@@ -10,6 +10,15 @@ def json_parse_dirty(json:str) -> dict[str,Any] | None:
     if not json or not isinstance(json, str):
         return None
 
+    # PATCH: direct json.loads for adapter plain JSON
+    try:
+        import json as _json
+        _direct = _json.loads(json.strip())
+        if isinstance(_direct, dict):
+            return _direct
+    except Exception:
+        pass
+
     ext_json = extract_json_object_string(json.strip())
     if ext_json:
         try:
