@@ -1,6 +1,7 @@
 """Claude Code Adapter Service — headless FastAPI wrapper around Claude CLI."""
 
 from __future__ import annotations
+import budget
 
 import asyncio
 import json
@@ -453,6 +454,9 @@ async def chat_completions(req: ChatCompletionRequest):
     # DISABLED: )
 
     # Synchronous mode: run Claude CLI and wait for full output
+    ok, msg = budget.check_budget()
+    if not ok:
+        raise HTTPException(status_code=429, detail=msg)
     output = await _run_claude_sync(user_prompt, max_turns, system_prompt=system_prompt)
 
     # Fallback: wrap plain text in Agent Zero JSON format
@@ -465,7 +469,7 @@ async def chat_completions(req: ChatCompletionRequest):
             output = json.dumps({"thoughts":["Direct response."],"headline":"Responding to user","tool_name":"response","tool_args":{"text":_os}})
 
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-    return ChatCompletionResponse(
+    resp = ChatCompletionResponse(
         id=completion_id,
         created=int(time.time()),
         model=req.model,
@@ -480,7 +484,13 @@ async def chat_completions(req: ChatCompletionRequest):
             total_tokens=(len(user_prompt) + len(output)) // 4,
         ),
     )
+    budget.record_usage(len(user_prompt) // 4, len(output) // 4)
+    return resp
 
+
+@app.get("/budget")
+async def budget_status():
+    return budget.get_status()
 
 # ── Original task-based routes ─────────────────────────────────────────────────────
 
