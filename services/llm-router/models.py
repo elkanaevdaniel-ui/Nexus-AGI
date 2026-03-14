@@ -24,6 +24,7 @@ class Provider(str, Enum):
     OPENROUTER = "openrouter"
     GOOGLE_GEMINI = "google_gemini"
     DEEPSEEK = "deepseek"
+    NVIDIA_NIM = "nvidia_nim"
 
 
 class TaskType(str, Enum):

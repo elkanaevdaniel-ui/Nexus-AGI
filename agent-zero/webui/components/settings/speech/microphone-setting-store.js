@@ -16,6 +16,7 @@ const model = {
     },
 
     async loadDevices() {
+            if (!navigator.mediaDevices) return;
         // Get media devices
         const devices = await navigator.mediaDevices.enumerateDevices();
         // Filter for audio input (microphones)

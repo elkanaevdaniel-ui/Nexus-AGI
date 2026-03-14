@@ -138,11 +138,28 @@ async def call_gpt_node(state: ConsensusState) -> dict:
     }
 
 
+
+async def call_nemotron_node(state: ConsensusState) -> dict:
+    """Nemotron analyst - agentic reasoning via NVIDIA NIM."""
+    prompt = _build_probability_prompt(state)
+    try:
+        raw = await _call_router(prompt, tier="deep", preferred_provider="nvidia_nim")
+        estimate = _parse_llm_response(raw, "Nemotron")
+    except Exception as e:
+        logger.error("Nemotron node failed: %s", e)
+        estimate = {"probability": 0.5, "confidence": "low",
+                    "reasoning": f"Nemotron call failed: {e}"}
+    return {
+        "nemotron_estimate": estimate,
+        "messages": [{"role": "nemotron",
+                      "content": "Analysis: p=%.3f" % estimate["probability"]}],
+    }
+
 async def argue_bull_case(state: ConsensusState) -> dict:
     """Bull researcher — argues for higher probability using LLM analysis."""
     estimates = []
     reasonings = []
-    for key in ["claude_estimate", "gemini_estimate", "gpt_estimate"]:
+    for key in ["claude_estimate", "gemini_estimate", "gpt_estimate", "nemotron_estimate"]:
         est = state.get(key)
         if est and isinstance(est, dict):
             estimates.append(est.get("probability", 0.5))
@@ -174,7 +191,7 @@ async def argue_bear_case(state: ConsensusState) -> dict:
     """Bear researcher — argues for lower probability using LLM analysis."""
     estimates = []
     reasonings = []
-    for key in ["claude_estimate", "gemini_estimate", "gpt_estimate"]:
+    for key in ["claude_estimate", "gemini_estimate", "gpt_estimate", "nemotron_estimate"]:
         est = state.get(key)
         if est and isinstance(est, dict):
             estimates.append(est.get("probability", 0.5))
@@ -205,7 +222,7 @@ async def argue_bear_case(state: ConsensusState) -> dict:
 async def synthesize_consensus(state: ConsensusState) -> dict:
     """Synthesizer — produces final consensus from all inputs."""
     estimates = []
-    for key in ["claude_estimate", "gemini_estimate", "gpt_estimate"]:
+    for key in ["claude_estimate", "gemini_estimate", "gpt_estimate", "nemotron_estimate"]:
         est = state.get(key)
         if est and isinstance(est, dict):
             estimates.append(est.get("probability", 0.5))
@@ -244,6 +261,7 @@ def build_consensus_graph() -> Any:
         workflow.add_node("claude_analyst", call_claude_node)
         workflow.add_node("gemini_analyst", call_gemini_node)
         workflow.add_node("gpt_analyst", call_gpt_node)
+        workflow.add_node("nemotron_analyst", call_nemotron_node)
         workflow.add_node("bull_researcher", argue_bull_case)
         workflow.add_node("bear_researcher", argue_bear_case)
         workflow.add_node("synthesizer", synthesize_consensus)
@@ -252,11 +270,13 @@ def build_consensus_graph() -> Any:
         workflow.add_edge(START, "claude_analyst")
         workflow.add_edge(START, "gemini_analyst")
         workflow.add_edge(START, "gpt_analyst")
+        workflow.add_edge(START, "nemotron_analyst")
 
         # Fan-in: all 3 -> bull -> bear -> synthesizer
         workflow.add_edge("claude_analyst", "bull_researcher")
         workflow.add_edge("gemini_analyst", "bull_researcher")
         workflow.add_edge("gpt_analyst", "bull_researcher")
+        workflow.add_edge("nemotron_analyst", "bull_researcher")
         workflow.add_edge("bull_researcher", "bear_researcher")
         workflow.add_edge("bear_researcher", "synthesizer")
         workflow.add_edge("synthesizer", END)

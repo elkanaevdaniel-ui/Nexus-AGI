@@ -416,7 +416,7 @@ class LiteLLMChatWrapper(SimpleChatModel):
         for chunk in completion(
             model=self.model_name,
             messages=msgs,
-            stream=True,
+            stream=False,  # NEXUS: force non-streaming
             stop=stop,
             **{**self.kwargs, **kwargs},
         ):
@@ -447,7 +447,7 @@ class LiteLLMChatWrapper(SimpleChatModel):
         response = await acompletion(
             model=self.model_name,
             messages=msgs,
-            stream=True,
+            stream=False,  # NEXUS: force non-streaming
             stop=stop,
             **{**self.kwargs, **kwargs},
         )
@@ -512,7 +512,7 @@ class LiteLLMChatWrapper(SimpleChatModel):
                 _completion = await acompletion(
                     model=self.model_name,
                     messages=msgs_conv,
-                    stream=stream,
+                    stream=False,  # NEXUS: force non-streaming for claude-adapter
                     **call_kwargs,
                 )
 
@@ -845,6 +845,10 @@ def _adjust_call_args(provider_name: str, model_name: str, kwargs: dict):
             "HTTP-Referer": "https://agent-zero.ai",
             "X-Title": "Agent Zero",
         }
+
+    # nvidia_nim support for Nemotron
+    if provider_name == "nvidia_nim":
+        kwargs["api_base"] = "https://integrate.api.nvidia.com/v1"
 
     # remap other to openai for litellm
     if provider_name == "other":

@@ -65,7 +65,7 @@ class ChatMessage(BaseModel):
     content: str = ""
 
 class ChatCompletionRequest(BaseModel):
-    model: str = "claude-opus-4-6"
+    model: str = "claude-sonnet-4-6"
     messages: list[ChatMessage] = []
     temperature: float | None = None
     max_tokens: int | None = None
@@ -142,8 +142,7 @@ async def _run_claude_task(task_id: str, prompt: str, working_dir: str, max_turn
     cli_path = shutil.which(CLAUDE_CLI_PATH) or CLAUDE_CLI_PATH
     cmd = [
         cli_path,
-        "--print", "--verbose",
-        "--output-format", "stream-json",
+        "--print",
         "--max-turns", str(max_turns),
     ]
     if system_prompt:
@@ -261,8 +260,7 @@ async def _run_claude_sync(prompt: str, max_turns: int = 5, system_prompt: str =
     cli_path = shutil.which(CLAUDE_CLI_PATH) or CLAUDE_CLI_PATH
     cmd = [
         cli_path,
-        "--print", "--verbose",
-        "--output-format", "stream-json",
+        "--print",
         "--max-turns", str(max_turns),
         prompt,
     ]
@@ -311,8 +309,7 @@ async def _stream_claude_sse(prompt: str, model: str, max_turns: int = 5, system
     cli_path = shutil.which(CLAUDE_CLI_PATH) or CLAUDE_CLI_PATH
     cmd = [
         cli_path,
-        "--print", "--verbose",
-        "--output-format", "stream-json",
+        "--print",
         "--max-turns", str(max_turns),
     ]
     if system_prompt:
@@ -425,13 +422,26 @@ async def chat_completions(req: ChatCompletionRequest):
     if not user_prompt.strip():
         raise HTTPException(status_code=400, detail="No messages provided")
 
-    max_turns = 5  # Keep it lean for chat completions
+    max_turns = 1  # Single turn for fast chat completions
 
-    if req.stream:
-        return StreamingResponse(
-            _stream_claude_sse(user_prompt, req.model, max_turns, system_prompt=system_prompt),
-            media_type="text/event-stream",
-        )
+    # DISABLED: if req.stream:
+    # DISABLED: # Use sync call and wrap as SSE (streaming CLI removed for speed)
+    # DISABLED: sync_output = await _run_claude_sync(user_prompt, max_turns, system_prompt=system_prompt)
+    # DISABLED: import uuid as _uuid
+    # DISABLED: async def _fake_stream():
+    # DISABLED: chunk = {
+    # DISABLED: 'id': f'chatcmpl-{_uuid.uuid4().hex[:12]}',
+    # DISABLED: 'object': 'chat.completion.chunk',
+    # DISABLED: 'created': int(__import__('time').time()),
+    # DISABLED: 'model': req.model,
+    # DISABLED: 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': sync_output}, 'finish_reason': 'stop'}],
+    # DISABLED: }
+    # DISABLED: yield f'data: {json.dumps(chunk)}\n\n'
+    # DISABLED: yield 'data: [DONE]\n\n'
+    # DISABLED: return StreamingResponse(
+    # DISABLED: _fake_stream(),
+    # DISABLED: media_type="text/event-stream",
+    # DISABLED: )
 
     # Synchronous mode: run Claude CLI and wait for full output
     output = await _run_claude_sync(user_prompt, max_turns, system_prompt=system_prompt)

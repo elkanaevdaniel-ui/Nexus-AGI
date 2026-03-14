@@ -29,6 +29,16 @@ def get_provider_env() -> dict[Provider, dict[str, str]]:
         Provider.DEEPSEEK: {
             "api_key": os.environ.get("DEEPSEEK_API_KEY", ""),
             "base_url": "https://api.deepseek.com/v1",
+            },
+        Provider.NVIDIA_NIM: {
+            "api_key": os.environ.get("NVIDIA_API_KEY", ""),
+            "base_url": "https://integrate.api.nvidia.com/v1",
+        },
+    },
+        },
+        Provider.NVIDIA_NIM: {
+            "api_key": os.environ.get("NVIDIA_API_KEY", ""),
+            "base_url": "https://integrate.api.nvidia.com/v1",
         },
     }
 
@@ -148,6 +158,16 @@ ALL_MODELS: list[ModelConfig] = [
         cost_per_1k_output=0.0022,
         max_context_tokens=128_000,
     ),
+    ModelConfig(
+        model_id="nvidia/nemotron-3-super-120b-a12b",
+        display_name="Nemotron 3 Super",
+        provider=Provider.NVIDIA_NIM,
+        tier=ModelTier.DEEP,
+        cost_per_1k_input=0.0003,
+        cost_per_1k_output=0.0012,
+        max_context_tokens=1_000_000,
+        supports_vision=False,
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -171,6 +191,7 @@ FALLBACK_CHAINS: dict[ModelTier, list[str]] = {
         "claude-opus-4-20250514",
         "o1",
         "deepseek-reasoner",
+        "nvidia/nemotron-3-super-120b-a12b",
     ],
 }
 
@@ -183,6 +204,7 @@ PROVIDER_RATE_LIMITS: dict[Provider, int] = {
     Provider.OPENROUTER: 200,
     Provider.GOOGLE_GEMINI: 360,
     Provider.DEEPSEEK: 120,
+    Provider.NVIDIA_NIM: 200,
 }
 
 # ---------------------------------------------------------------------------
